@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Service tests
+        run: python -m unittest discover -s tests -v
+      - name: Install manifest checker dependency
+        run: python -m pip install -r requirements-dev.txt
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.31.0'
+      - name: Render and check Kubernetes manifests
+        run: python tools/check_manifests.py
+      - name: Build container
+        run: docker build -t resilience-lab:ci .
+      - name: Smoke test container
+        shell: bash
+        run: |
+          docker run -d --rm --name resilience-lab-ci -p 127.0.0.1:18080:8080 resilience-lab:ci
+          trap 'docker stop resilience-lab-ci >/dev/null' EXIT
+          python - <<'PY'
+          import time
+          from urllib.request import urlopen
+          for _ in range(30):
+              try:
+                  with urlopen('http://127.0.0.1:18080/readyz', timeout=1) as response:
+                      assert response.status == 200
+                  with urlopen('http://127.0.0.1:18080/work?iterations=10', timeout=1) as response:
+                      assert response.status == 200
+                  print('OK: container readiness and work endpoint')
+                  break
+              except Exception:
+                  time.sleep(0.2)
+          else:
+              raise SystemExit('container did not become ready')
+          PY

@@ -1,0 +1,51 @@
+# Optional synthetic CPU load. Apply separately after the main Kustomization.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: resilience-lab-load
+  namespace: resilience-lab
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 240
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        resilience-lab-access: "true"
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: load
+          image: resilience-lab:local
+          imagePullPolicy: Never
+          command:
+            - python
+            - -m
+            - tools.load
+          args:
+            - http://resilience-lab/work
+            - --seconds
+            - "120"
+            - --workers
+            - "8"
+            - --iterations
+            - "100000"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
